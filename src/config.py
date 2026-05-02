@@ -13,6 +13,9 @@ DATA_DIR = ROOT / "data"
 OUTPUT_DIR = ROOT / "output"
 REPORTS_DIR = ROOT / "reports"
 
+MODEL_PATH = OUTPUT_DIR / "modelo_chuva.joblib"
+MODEL_METADATA_PATH = OUTPUT_DIR / "modelo_chuva.metadata.json"
+
 CEMADEN_STATION = "310620007A"
 LAT_CEMADEN = -19.866
 LON_CEMADEN = -43.956

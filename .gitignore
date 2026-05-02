@@ -4,3 +4,9 @@ __pycache__/
 
 data/*.csv
 !data/.gitkeep
+
+# Modelos + metadados de treino (ambiente-local)
+output/modelo_chuva.joblib
+output/modelo_chuva.joblib.backup
+output/modelo_chuva.metadata.json
+output/modelo_chuva.metadata.json.backup

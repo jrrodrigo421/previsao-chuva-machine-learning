@@ -30,7 +30,7 @@
 - **Validação cronológica adicional:** `TimeSeriesSplit` — média e desvio por fold ficam consolidados em `metricas_modelo.json` e detalhe por fold em `metricas_cv_fold.csv`.
 - **Saídas** em `reports/`: nulos, tipos, distribuição da target, correlações, métricas, *real × previsto*, importâncias, MSE por estágio treino/teste.
 - **Dataset:** `output/dataset_final.csv`.
-
+- **Modelo gravado:** após cada `train.py` bem-sucedido (sem `--no-save`), ficam **`output/modelo_chuva.joblib`** e **`modelo_chuva.metadata.json`**; versões antigas ficam como `*.backup`. Inferência: `python src/predict.py --input ...`. Opções `--no-save`, `--eval-only`, `--compare-prev` — ver **`plano_modelo_inteligencia_persistente.md`**.
 ### Como reproduzir
 
 ```powershell
@@ -45,6 +45,13 @@ python src/train.py
 Ou: `python src/run_all.py`.
 
 A primeira vez que `build_dataset` roda, a NASA é baixada e o cache em `data/` pode levar vários minutos. O nome do cache (**`…_pampulha_utc.csv`**) é **diferente** do arquivo antigo `…_pampulha.csv`, de modo que a primeira rodada depois dessa mudança refaz o download já com **`time-standard=UTC`** sem depender de apagar caches manualmente.
+
+### Persistência / inferência
+
+Resumo já implementado:
+
+- **`python src/train.py`** — guarda modelo + metadata (substitui ciclo anterior com backup).
+- **`python src/predict.py --input seu.csv`** (opcional **`--output output/previsoes.csv`**) — só carrega modelo; entrada precisa ter todas as colunas `feature_columns` do JSON.
 
 ### Interpretação das métricas
 
