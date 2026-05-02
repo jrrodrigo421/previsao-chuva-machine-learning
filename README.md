@@ -49,5 +49,3 @@ A primeira vez que `build_dataset` roda, a NASA é baixada e o cache em `data/` 
 ### Interpretação das métricas
 
 Chuva diária é assimétrica; **R²** pode ficar baixo. Compare sempre com **`holdout_baseline_mean_*`**, **`holdout_baseline_persist_*`** e com os agregados **`cv_*_mean`** / **`cv_*_std`** no `metricas_modelo.json`, além dos gráficos — não apenas um número isolado.
-
-Para detalhe metodológico, ver **`implementacao.md`**.
