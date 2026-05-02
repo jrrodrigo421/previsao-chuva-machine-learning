@@ -29,8 +29,17 @@ def build_final_dataset() -> pd.DataFrame:
         nasa_d["nasa_PRECTOT"].rolling(7, min_periods=1).mean()
     )
 
-    base = pd.DataFrame({"target_mm_next_day": cemaden.shift(-1)})
-    df = base.join(inmet, how="inner").join(nasa_d, how="inner")
+    cemaden_feats = pd.DataFrame(
+        {
+            "cemaden_lag1": cemaden,
+            "cemaden_lag2": cemaden.shift(1),
+            "cemaden_lag3": cemaden.shift(2),
+            "cemaden_roll3": cemaden.rolling(3, min_periods=1).mean(),
+            "cemaden_roll7": cemaden.rolling(7, min_periods=1).mean(),
+            "target_mm_next_day": cemaden.shift(-1),
+        }
+    )
+    df = cemaden_feats.join(inmet, how="inner").join(nasa_d, how="inner")
     df = df.dropna(subset=["target_mm_next_day"])
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUTPUT_DIR / "dataset_final.csv"
