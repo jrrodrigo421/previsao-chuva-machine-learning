@@ -1,35 +1,3 @@
-## Como iniciar
-
-> Este repositório deve ser usado apenas como base inicial do desafio.  
-> A entrega deve ser feita em um **novo repositório privado** no GitHub, preservando a estrutura solicitada e compartilhado com os avaliadores ao final.
-
-Para iniciar o desafio, siga o fluxo abaixo:
-
-1. Clone este repositório base:
-   ```bash
-   git clone <url-do-repositorio-base>
-   cd <nome-do-repositorio>
-   ```
-
-2. Crie um **novo repositório privado** no seu GitHub.
-
-3. Remova o `origin` atual:
-   ```bash
-   git remote remove origin
-   ```
-
-4. Adicione o seu novo repositório privado como `origin`:
-   ```bash
-   git remote add origin <url-do-seu-repositorio-privado>
-   ```
-
-5. Suba o código para o seu repositório:
-   ```bash
-   git push -u origin main
-   ```
-
-6. Ao final do desafio, compartilhe o acesso ao repositório privado com os avaliadores.
-
 # Desafio Técnico — Engenheiro de ML/IA Júnior
 
 Seu desafio é, a partir de **3 datasets**, construir um **único dataset final** para o treinamento de um modelo capaz de **prever precipitação de chuva** para um local definido a partir dos dados fornecidos.
@@ -120,8 +88,53 @@ A documentação da entrega deve permitir compreender com clareza os critérios 
 
 **A avaliação considerará não apenas o desempenho final do modelo, mas também a coerência metodológica, a qualidade da construção do dataset, a capacidade de sustentar tecnicamente as decisões tomadas, o uso adequado de Git, a organização do repositório, a clareza do código e a reprodutibilidade da solução.**
 
-## Contato
+---
 
-Em caso de dúvidas sobre o desafio, entre em contato pelo WhatsApp:
+## Solução implementada (neste repositório)
 
-**WhatsApp:** +55 35 9884-2597
+### Escopo espacial e temporal
+
+- **Local:** Belo Horizonte — estação pluviométrica CEMADEN **Pampulha** (`codEstacao` `310620007A`), alinhada ao arquivo INMET **A521 BELO HORIZONTE (PAMPULHA)** e às coordenadas da NASA POWER **−19,866° / −43,956°** (mesmo ponto da CEMADEN).
+- **Ano:** 2024 (CEMADEN mensal + INMET anual + NASA horário agregado ao dia civil).
+
+### Horizonte de previsão (≥ 24 h)
+
+- **Target:** soma diária de `valorMedida` (mm) no **dia seguinte** ao dia das covariáveis — ou seja, com informações disponíveis até o fim do dia *D*, prevê-se a chuva acumulada no dia *D+1* em grade civil (`America/Sao_Paulo`). Isso implica horizonte **mínimo de 24 h** em relação ao início do dia alvo e é adequado a alertas operacionais em escala diária.
+
+### Integração dos três datasets
+
+| Fonte | Uso |
+|--------|-----|
+| **CEMADEN** | Soma diária de `valorMedida` por estação; o **target** é essa soma deslocada para o dia seguinte. |
+| **INMET** | Médias diárias das variáveis horárias (UTC convertido para Minas) e **soma diária** da precipitação horária (primeira coluna de medições). |
+| **NASA POWER** | API *hourly point* (`community=AG`), parâmetros exigidos no desafio. A API devolve precipitação como **PRECTOTCORR**; tratamos como **`PRECTOT`** no dataset (nome canônico do desafio). Agregação diária: médias horárias por variável; média móvel de 7 dias em `nasa_PRECTOT` como proxy de umidade/persistência. Cache em `data/nasa_hourly_2024_pampulha.csv`. |
+
+### Processamento
+
+- CEMADEN: leitura em **chunks** (`pandas.read_csv(..., chunksize=...)`) com `decimal=','`, apenas colunas necessárias — boas práticas para CSV grandes em memória limitada.
+- NASA: download **mensal** para reduzir falhas de rede/timeout; junção dos meses após validação.
+
+### Modelo e artefatos
+
+- Modelo: **Gradient Boosting** (`sklearn.ensemble.GradientBoostingRegressor`), validação **cronológica** (80% primeiros dias / 20% últimos dias).
+- Saídas numéricas e gráficas em `reports/` (nulos, tipos, distribuição da target, correlações, métricas, real *vs* previsto, importância de features, MSE por estágio — treino e teste).
+- Dataset tabular final: `output/dataset_final.csv`.
+
+### Como reproduzir
+
+```powershell
+cd Desafio_IA_Junior
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python src/build_dataset.py
+python src/train.py
+```
+
+Ou em um único passo: `python src/run_all.py`.
+
+A primeira execução de `build_dataset` chama a API NASA e grava cache em `data/` (pode levar alguns minutos).
+
+### Interpretação das métricas
+
+Precipitação diária é **altamente assimétrica** (muitos dias secos e poucos extremos); **R²** pode ficar baixo ou negativo mesmo com pipeline correto. As métricas em `reports/metricas_modelo.json` devem ser lidas junto com os gráficos e com uma linha de base ingênua (média ou persistência), conforme o relatório do avaliador pedir.
