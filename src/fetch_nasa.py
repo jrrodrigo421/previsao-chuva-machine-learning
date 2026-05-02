@@ -28,7 +28,7 @@ def fetch_month(year: int, month: int, retries: int = 4) -> pd.DataFrame:
         "https://power.larc.nasa.gov/api/temporal/hourly/point"
         f"?parameters={NASA_PARAMS}&community=AG"
         f"&longitude={LON_CEMADEN}&latitude={LAT_CEMADEN}"
-        f"&start={start}&end={end}&format=CSV"
+        f"&start={start}&end={end}&format=CSV&time-standard=UTC"
     )
     wait = 3.0
     for attempt in range(retries):
@@ -45,16 +45,20 @@ def fetch_month(year: int, month: int, retries: int = 4) -> pd.DataFrame:
 
 
 def load_or_fetch_nasa_hourly(year: int = 2024) -> pd.DataFrame:
+    """Baixa (ou lê do cache) a série horária NASA POWER em UTC.
+
+    O sufixo `_utc` no nome do cache invalida caches antigos que
+    foram salvos com o padrão LST default da API.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    cache = DATA_DIR / f"nasa_hourly_{year}_pampulha.csv"
+    cache = DATA_DIR / f"nasa_hourly_{year}_pampulha_utc.csv"
     if cache.exists():
-        df = pd.read_csv(cache, parse_dates=["ts"])
-        return df
+        return pd.read_csv(cache, parse_dates=["ts_utc"])
 
     parts = [fetch_month(year, m) for m in range(1, 13)]
     df = pd.concat(parts, ignore_index=True)
-    df["ts"] = pd.to_datetime(
-        dict(year=df.YEAR, month=df.MO, day=df.DY, hour=df.HR)
+    df["ts_utc"] = pd.to_datetime(
+        dict(year=df.YEAR, month=df.MO, day=df.DY, hour=df.HR), utc=True
     )
     df = df.drop(columns=["YEAR", "MO", "DY", "HR"])
     df.to_csv(cache, index=False)

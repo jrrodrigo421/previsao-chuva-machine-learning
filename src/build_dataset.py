@@ -9,14 +9,14 @@ from load_inmet import load_inmet_bh_daily
 
 
 def nasa_hourly_to_daily(hourly: pd.DataFrame) -> pd.DataFrame:
+    """Agrega séries horárias NASA por dia civil em America/Sao_Paulo."""
     h = hourly.copy()
-    h["day"] = pd.to_datetime(h["ts"]).dt.normalize()
-    skip = {"ts", "day"}
+    ts = pd.to_datetime(h["ts_utc"], utc=True).dt.tz_convert("America/Sao_Paulo")
+    h["day"] = pd.to_datetime(ts.dt.date)
+    skip = {"ts_utc", "day"}
     cols = [c for c in h.columns if c not in skip]
-    agg = {c: "mean" for c in cols}
-    out = h.groupby("day", as_index=False).agg(agg)
+    out = h.groupby("day", as_index=False)[cols].mean()
     out.columns = ["day"] + [f"nasa_{c}" for c in cols]
-    out["day"] = pd.to_datetime(out["day"]).dt.normalize()
     return out.set_index("day").sort_index()
 
 
