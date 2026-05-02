@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,10 +9,28 @@ import seaborn as sns
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 
 from config import OUTPUT_DIR, REPORTS_DIR
 
+
+def _regression_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray
+) -> dict[str, float | None]:
+    """MAE, MSE, RMSE, R². R² é None quando a variância do alvo é nula."""
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    mae = float(mean_absolute_error(y_true, y_pred))
+    mse = float(mean_squared_error(y_true, y_pred))
+    rmse = float(np.sqrt(mse))
+    vy = float(np.var(y_true))
+    r2_val: float | None
+    if vy > 0:
+        r2_val = float(r2_score(y_true, y_pred))
+    else:
+        r2_val = None
+    return {"MAE": mae, "MSE": mse, "RMSE": rmse, "R2": r2_val}
 
 def main() -> None:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -61,9 +78,20 @@ def main() -> None:
     X_arr = num.to_numpy(dtype=float)
     y_arr = y.to_numpy(dtype=float)
 
+    try:
+        lag_idx = feature_names.index("cemaden_lag1")
+    except ValueError:
+        lag_idx = -1
+
     split = int(len(df) * 0.8)
     X_train, X_test = X_arr[:split], X_arr[split:]
     y_train, y_test = y_arr[:split], y_arr[split:]
+
+    y_mean_train = float(np.mean(y_train))
+    pred_holdout_mean = np.full_like(y_test, fill_value=y_mean_train, dtype=float)
+    pred_holdout_persist = (
+        X_test[:, lag_idx].astype(float) if lag_idx >= 0 else np.zeros_like(y_test)
+    )
 
     gb = GradientBoostingRegressor(
         random_state=42,
@@ -81,10 +109,13 @@ def main() -> None:
     pipe.fit(X_train, y_train)
     pred = pipe.predict(X_test)
 
-    mae = mean_absolute_error(y_test, pred)
-    mse = mean_squared_error(y_test, pred)
-    rmse = float(np.sqrt(mse))
-    r2 = r2_score(y_test, pred)
+    m_model = _regression_metrics(y_test, pred)
+    m_mean = _regression_metrics(y_test, pred_holdout_mean)
+    m_persist = (
+        _regression_metrics(y_test, pred_holdout_persist)
+        if lag_idx >= 0
+        else {}
+    )
 
     Xt_train = pipe.named_steps["imp"].transform(X_train)
     Xt_test = pipe.named_steps["imp"].transform(X_test)
@@ -99,18 +130,96 @@ def main() -> None:
         [mean_squared_error(y_test, p) for p in gb_fit.staged_predict(Xt_test)]
     )
 
-    metrics = {
-        "MAE": float(mae),
-        "MSE": float(mse),
-        "RMSE": rmse,
-        "R2": float(r2),
-        "n_train": int(split),
+    n_samples = len(y_arr)
+    n_splits = min(5, max(3, n_samples // 70))
+    tsc = TimeSeriesSplit(n_splits=n_splits)
+
+    gb_cv = GradientBoostingRegressor(
+        random_state=42,
+        max_depth=4,
+        learning_rate=0.06,
+        n_estimators=200,
+        subsample=0.9,
+    )
+    pipe_cv = Pipeline(
+        [
+            ("imp", SimpleImputer(strategy="median")),
+            ("gb", gb_cv),
+        ]
+    )
+
+    rows_cv: list[dict[str, object]] = []
+    for fold, (tr_ix, te_ix) in enumerate(tsc.split(X_arr, y_arr), start=1):
+        X_tr, X_te = X_arr[tr_ix], X_arr[te_ix]
+        y_tr, y_te = y_arr[tr_ix], y_arr[te_ix]
+        pipe_cv.fit(X_tr, y_tr)
+        pred_gb = pipe_cv.predict(X_te)
+        m_tr = float(np.mean(y_tr))
+        pred_fold_mean = np.full_like(y_te, fill_value=m_tr, dtype=float)
+        pred_fold_persist = (
+            X_te[:, lag_idx].astype(float)
+            if lag_idx >= 0
+            else np.zeros_like(y_te)
+        )
+
+        row: dict[str, object] = {
+            "fold": fold,
+            "n_train": len(tr_ix),
+            "n_test": len(te_ix),
+        }
+        for key, vals in [
+            ("model", _regression_metrics(y_te, pred_gb)),
+            ("baseline_mean", _regression_metrics(y_te, pred_fold_mean)),
+            (
+                "baseline_persist",
+                _regression_metrics(y_te, pred_fold_persist)
+                if lag_idx >= 0
+                else {},
+            ),
+        ]:
+            for mname, mv in vals.items():
+                row[f"{key}_{mname}"] = mv
+        rows_cv.append(row)
+
+    def _mean_std(metric_key: str) -> tuple[float | None, float | None]:
+        vals_f = []
+        for r in rows_cv:
+            v = r.get(metric_key)
+            if v is not None and isinstance(v, (int, float)) and np.isfinite(v):
+                vals_f.append(float(v))
+        if not vals_f:
+            return None, None
+        arr = np.array(vals_f, dtype=float)
+        return float(arr.mean()), float(arr.std(ddof=0))
+
+    cv_summary: dict[str, float | None | int] = {"n_splits": n_splits}
+    for prefix in ("model", "baseline_mean", "baseline_persist"):
+        for suf in ("MAE", "MSE", "RMSE", "R2"):
+            key_out = f"cv_{prefix}_{suf}"
+            m, s = _mean_std(f"{prefix}_{suf}")
+            cv_summary[f"{key_out}_mean"] = m
+            cv_summary[f"{key_out}_std"] = s
+
+    metrics: dict[str, float | None | int] = {
+        "MAE": m_model["MAE"],
+        "MSE": m_model["MSE"],
+        "RMSE": m_model["RMSE"],
+        "R2": m_model["R2"],
+        "n_train": split,
         "n_test": int(len(df) - split),
     }
+    for k, v in m_mean.items():
+        metrics[f"holdout_baseline_mean_{k}"] = v
+    if lag_idx >= 0 and m_persist:
+        for k, v in m_persist.items():
+            metrics[f"holdout_baseline_persist_{k}"] = v
+    metrics.update(cv_summary)
+
     (REPORTS_DIR / "metricas_modelo.json").write_text(
-        json.dumps(metrics, indent=2), encoding="utf-8"
+        json.dumps(metrics, indent=2, allow_nan=False), encoding="utf-8"
     )
     pd.DataFrame([metrics]).to_csv(REPORTS_DIR / "metricas_modelo.csv", index=False)
+    pd.DataFrame(rows_cv).to_csv(REPORTS_DIR / "metricas_cv_fold.csv", index=False)
 
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(staged_train, label="MSE treino (por estágio)")
